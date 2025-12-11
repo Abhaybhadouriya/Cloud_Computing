@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package kvstore;
+
+service ControllerService {
+  rpc Register (RegisterRequest) returns (Ack);
+  rpc Heartbeat (HeartbeatRequest) returns (Ack);
+}
+
+service WorkerService {
+  rpc Replicate (ReplicateRequest) returns (Ack);
+  rpc Recover (RecoverRequest) returns (Ack);
+}
+
+message RegisterRequest {
+  int32 worker_id = 1;
+  string http_address = 2; 
+  string grpc_address = 3; 
+}
+
+message HeartbeatRequest {
+  int32 worker_id = 1;
+}
+
+message ReplicateRequest {
+  string key = 1;
+  string value = 2; 
+}
+
+message RecoverRequest {
+  int32 dead_node_id = 1;
+  string target_grpc_address = 2; 
+}
+
+message Ack {
+  bool success = 1;
+  string message = 2;
+  int32 config_replica_count = 3; // <--- NEW FIELD
+}

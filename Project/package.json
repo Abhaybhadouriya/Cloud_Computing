@@ -1,0 +1,20 @@
+{
+  "name": "kv-store-node",
+  "version": "1.0.0",
+  "description": "Distributed KV Store in Node.js",
+  "main": "kv_stores.js",
+  "scripts": {
+    "start": "node kv_stores.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.2",
+    "@grpc/proto-loader": "^0.8.0",
+    "axios": "^1.6.0",
+    "body-parser": "^1.20.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.0",
+    "socket.io": "^4.8.1"
+  },
+  "author": "",
+  "license": "ISC"
+}

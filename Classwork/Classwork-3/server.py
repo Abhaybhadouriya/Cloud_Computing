@@ -1,26 +1,39 @@
+
 import grpc
 from concurrent import futures
 import time
-import chat_pb2
-import chat_pb2_grpc
 
-class ChatService(chat_pb2_grpc.ChatServiceServicer):
+import chatbot_pb2
+import chatbot_pb2_grpc
+
+chat_responses = {
+    "Hello": "Hi there!",
+    "How are you?": "I'm a bot, but I'm doing fine!",
+    "What is your name?": "I'm Naval's ChatBot.",
+}
+
+
+class ChatServicer(chatbot_pb2_grpc.ChatServiceServicer):
     def ChatStream(self, request_iterator, context):
-        for chat_request in request_iterator:
-            print(f"Received from client: {chat_request.message}")
-            reply_msg = f"Server reply to: {chat_request.message}"
-            yield chat_pb2.ChatResponse(reply=reply_msg)
+        for request in request_iterator:
+            msg = request.message
+            if msg == "Bye":
+                print("Client said Bye. Closing connection.")
+                break
+            response_text = chat_responses.get(msg, "Sorry, I did not understand response\n")
+            print(f"Received from client: {msg} | Responding with: {response_text}")
+            yield chatbot_pb2.ChatbotResponse(reply=response_text)
 
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    chat_pb2_grpc.add_ChatServiceServicer_to_server(ChatService(), server)
-    server.add_insecure_port('[::]:50051')
+    chatbot_pb2_grpc.add_ChatServiceServicer_to_server(ChatServicer(), server)
+    server.add_insecure_port('0.0.0.0:50051')
     server.start()
     print("Server started on port 50051")
     try:
         while True:
-            time.sleep(86400)
+            time.sleep(86400)  # One day
     except KeyboardInterrupt:
         server.stop(0)
 

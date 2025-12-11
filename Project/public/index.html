@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed KV Store</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-50 text-slate-800 font-sans antialiased">
+    <div id="app" class="min-h-screen p-4 md:p-8">
+        
+        <header class="mb-8 flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div class="mb-4 md:mb-0">
+                <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-2">
+                    <i class="fas fa-network-wired"></i>
+                    <span>Distributed Key-Value Store</span>
+                </h1>
+                <p class="text-slate-500 text-sm mt-1 ml-1">Controller running on port 5000</p>
+            </div>
+
+            <div class="flex items-center gap-6 bg-gray-50 px-6 py-3 rounded-lg border border-gray-200">
+                <span class="text-sm font-semibold text-slate-600">Replication Factor</span>
+                <div class="flex items-center gap-3">
+                    <input type="range" 
+                           min="1" 
+                           :max="config.total_workers" 
+                           v-model="desiredReplicas" 
+                           @change="updateConfig" 
+                           class="w-32 accent-indigo-600 cursor-pointer">
+                    <span class="bg-white px-3 py-1 rounded-md text-sm font-bold shadow-sm border text-indigo-600">
+                        {{ config.replica_count }}
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <div class="lg:col-span-2 space-y-6">
+                <section>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-slate-700">Cluster Nodes</h2>
+                        <span class="text-xs font-mono text-slate-400">Live Updates</span>
+                    </div>
+                    
+                    <div v-if="error" class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-r shadow-sm mb-6">
+                        <p class="font-bold">Connection Error</p>
+                        <p class="text-sm">{{ error }}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div v-for="(worker, id) in workers" :key="id" 
+                             class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow duration-200 relative">
+                            
+                            <div class="absolute top-0 left-0 w-1 h-full" 
+                                 :class="worker.alive ? 'bg-emerald-500' : 'bg-rose-500'"></div>
+
+                            <div class="p-5">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div>
+                                        <h3 class="font-bold text-lg text-slate-800">Worker {{ id }}</h3>
+                                        <div class="text-xs text-slate-500 font-mono mt-1">
+                                            {{ worker.address }}
+                                        </div>
+                                    </div>
+                                    <span class="px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
+                                          :class="worker.alive ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">
+                                        {{ worker.alive ? 'Online' : 'Offline' }}
+                                    </span>
+                                </div>
+                                
+                                <div class="bg-gray-50 rounded-lg p-3 border border-gray-100 min-h-[80px]">
+                                    <div class="text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">Storage Content</div>
+                                    
+                                    <div v-if="workerData[id] && Object.keys(workerData[id]).length > 0" class="space-y-1.5">
+                                        <div v-for="(val, key) in workerData[id]" :key="key" 
+                                             class="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-gray-200 text-sm">
+                                            <span class="font-mono text-indigo-600 font-medium">{{ key }}</span>
+                                            <span class="font-mono text-slate-600 truncate max-w-[120px]" :title="val">{{ val }}</span>
+                                        </div>
+                                    </div>
+                                    <div v-else class="text-sm text-slate-400 italic py-2 text-center">
+                                        No data stored
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="space-y-6">
+                <section class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sticky top-6">
+                    <h2 class="text-lg font-bold mb-6 text-indigo-900 flex items-center border-b pb-4">
+                        <i class="fas fa-terminal mr-3 text-indigo-500"></i> Client Interface
+                    </h2>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">Target Node</label>
+                        <div class="relative">
+                            <select v-model="targetUrl" class="w-full appearance-none bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all">
+                                <option value="http://localhost:5000">Controller (Routing Only)</option>
+                                <option v-for="(worker, id) in workers" :key="id" :value="worker.address">
+                                    Worker {{ id }} (Direct)
+                                </option>
+                            </select>
+                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                                <i class="fas fa-chevron-down text-xs"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex p-1 bg-gray-100 rounded-lg mb-6">
+                        <button @click="mode = 'get'" 
+                                class="flex-1 py-2 text-sm font-medium rounded-md transition-all duration-200"
+                                :class="mode === 'get' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'">
+                            GET
+                        </button>
+                        <button @click="mode = 'put'" 
+                                class="flex-1 py-2 text-sm font-medium rounded-md transition-all duration-200"
+                                :class="mode === 'put' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'">
+                            PUT
+                        </button>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <input v-model="requestKey" type="text" 
+                                   class="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono text-sm" 
+                                   placeholder="Key">
+                        </div>
+                        
+                        <div v-if="mode === 'put'">
+                            <input v-model="requestVal" type="text" 
+                                   class="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono text-sm" 
+                                   placeholder="Value">
+                        </div>
+
+                        <button type="button" 
+                                @click="mode === 'get' ? executeGet() : executePut()" 
+                                class="w-full py-2.5 rounded-lg text-white font-medium shadow-md hover:shadow-lg transform active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2"
+                                :class="mode === 'get' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'">
+                            <i class="fas" :class="mode === 'get' ? 'fa-search' : 'fa-save'"></i>
+                            {{ mode === 'get' ? 'Retrieve' : 'Store' }}
+                        </button>
+                    </div>
+
+                    <div class="mt-8">
+                        <label class="block text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider">System Output</label>
+                        <div class="bg-slate-900 rounded-lg p-4 shadow-inner border border-slate-800">
+                            <pre class="text-emerald-400 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all min-h-[120px] leading-relaxed">{{ responseLog }}</pre>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    config: { replica_count: 3, total_workers: 4 },
+                    workers: {},
+                    workerData: {},
+                    workerSockets: {},
+                    loading: false,
+                    error: null,
+                    desiredReplicas: 3,
+                    
+                    // UI State
+                    targetUrl: 'http://localhost:5000',
+                    mode: 'get',
+                    requestKey: '',
+                    requestVal: '',
+                    responseLog: '> System ready...'
+                }
+            },
+            mounted() {
+                this.initConnection();
+            },
+            methods: {
+                initConnection() {
+                    this.loading = true;
+                    const socket = io('http://localhost:5000');
+
+                    socket.on('connect', () => {
+                        this.error = null;
+                        this.log("Connected to Cluster Controller");
+                    });
+
+                    socket.on('cluster_update', (data) => {
+                        this.config = data.config;
+                        this.desiredReplicas = data.config.replica_count;
+                        this.workers = data.workers;
+                        this.manageWorkerConnections();
+                        this.loading = false;
+                    });
+
+                    socket.on('connect_error', () => {
+                        this.error = "Controller Unreachable";
+                    });
+                },
+
+                async updateConfig() {
+                    try {
+                        await fetch('http://localhost:5000/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ replica_count: this.desiredReplicas })
+                        });
+                    } catch (err) {
+                        console.error("Config sync failed:", err);
+                    }
+                },
+
+                manageWorkerConnections() {
+                    for (const [id, worker] of Object.entries(this.workers)) {
+                        const isAlive = worker.alive;
+                        const hasSocket = !!this.workerSockets[id];
+
+                        if (isAlive && !hasSocket) {
+                            const ws = io(worker.address);
+                            ws.on('data_update', (data) => {
+                                this.workerData[id] = data;
+                            });
+                            this.workerSockets[id] = ws;
+                        } else if ((!isAlive || !this.workers[id]) && hasSocket) {
+                            this.workerSockets[id].disconnect();
+                            delete this.workerSockets[id];
+                            this.workerData[id] = null;
+                        }
+                    }
+                },
+
+                async executeGet() {
+                    if (!this.requestKey) return;
+                    
+                    try {
+                        let endpoint = '/kv/';
+                        // Controller uses a different endpoint for routing lookup
+                        if (this.targetUrl.includes(':5000')) {
+                            endpoint = '/partition/';
+                        }
+                        
+                        const res = await fetch(`${this.targetUrl}${endpoint}${this.requestKey}`);
+                        const data = await res.json();
+                        this.log(JSON.stringify(data, null, 2));
+                    } catch (err) {
+                        this.log(`Error: ${err.message}`);
+                    }
+                },
+
+                async executePut() {
+                    if (!this.requestKey) return;
+
+                    try {
+                        const res = await fetch(`${this.targetUrl}/kv/${this.requestKey}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ value: this.requestVal })
+                        });
+                        
+                        const data = await res.json();
+                        this.log(JSON.stringify(data, null, 2));
+                        
+                        // Clear inputs on success
+                        this.requestKey = '';
+                        this.requestVal = '';
+                    } catch (err) {
+                        this.log(`Error: ${err.message}`);
+                    }
+                },
+
+                log(msg) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    this.responseLog = `[${timestamp}] ${msg}`;
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
